@@ -119,12 +119,16 @@ static bool auxiliaryProcessingRequired = false;
 static bool rxSignalReceived = false;
 static bool rxFlightChannelsValid = false;
 static uint8_t rxChannelCount;
+#if defined(USE_RX_MSP_OVERRIDE)
+static bool mspOverrideIsActive = false;
+#endif
 
 static timeUs_t needRxSignalBefore = 0;
 static timeUs_t suspendRxSignalUntil = 0;
 static uint8_t  skipRxSamples = 0;
 
 static float rcRaw[MAX_SUPPORTED_RC_CHANNEL_COUNT];     // last received raw value, as it comes
+float rcOrig[MAX_SUPPORTED_RC_CHANNEL_COUNT];     // last received original raw value, as it comes
 float rcData[MAX_SUPPORTED_RC_CHANNEL_COUNT];           // scaled, modified, checked and constrained values
 uint32_t validRxSignalTimeout[MAX_SUPPORTED_RC_CHANNEL_COUNT];
 
@@ -552,6 +556,9 @@ FAST_CODE_NOINLINE void rxFrameCheck(timeUs_t currentTimeUs, timeDelta_t current
         //  true only when a new packet arrives
         needRxSignalBefore = currentTimeUs + needRxSignalMaxDelayUs;
         rxSignalReceived = true; // immediately process packet data
+#if defined(USE_RX_MSP_OVERRIDE)
+        mspOverrideIsActive = false;
+#endif
         if (useDataDrivenProcessing) {
             rxDataProcessingRequired = true;
             //  process the new Rx packet when it arrives
@@ -573,6 +580,8 @@ FAST_CODE_NOINLINE void rxFrameCheck(timeUs_t currentTimeUs, timeDelta_t current
             rxSignalReceived = true;
             rxDataProcessingRequired = true;
             needRxSignalBefore = currentTimeUs + needRxSignalMaxDelayUs;
+            mspOverrideIsActive = true;
+
         }
     }
 #endif
@@ -643,6 +652,16 @@ static uint16_t getRxfailValue(uint8_t channel)
     }
 }
 
+static uint16_t getRxfailModeSetValue(uint8_t channel)
+{
+    const rxFailsafeChannelConfig_t *channelFailsafeConfig = rxFailsafeChannelConfigs(channel);
+
+    if (channelFailsafeConfig->mode == RX_FAILSAFE_MODE_SET) {
+        return RXFAIL_STEP_TO_CHANNEL_VALUE(channelFailsafeConfig->step);
+    }
+    return 0;
+}
+
 STATIC_UNIT_TESTED float applyRxChannelRangeConfiguraton(float sample, const rxChannelRangeConfig_t *range)
 {
     // Avoid corruption of channel with a value of PPM_RCVR_TIMEOUT
@@ -663,6 +682,8 @@ static void readRxChannelsApplyRanges(void)
 
         // sample the channel
         float sample;
+        rcOrig[channel] = rxRuntimeState.rcReadRawFn(&rxRuntimeState, rawChannel);
+
 #if defined(USE_RX_MSP_OVERRIDE)
         if (rxConfig()->msp_override_channels_mask) {
             sample = rxMspOverrideReadRawRc(&rxRuntimeState, rxConfig(), rawChannel);
@@ -742,6 +763,12 @@ void detectAndApplySignalLossBehaviour(void)
         }
 
         sample = constrainf(sample, PWM_PULSE_MIN, PWM_PULSE_MAX);
+
+#if defined(USE_RX_MSP_OVERRIDE)
+        if (mspOverrideIsActive) {
+            sample = getRxfailModeSetValue(channel) ? getRxfailModeSetValue(channel) : sample;
+        }
+#endif
 
 #if defined(USE_RX_PWM) || defined(USE_RX_PPM)
         if (rxRuntimeState.rxProvider == RX_PROVIDER_PARALLEL_PWM || rxRuntimeState.rxProvider == RX_PROVIDER_PPM) {

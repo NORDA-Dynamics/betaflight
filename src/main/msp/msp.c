@@ -742,6 +742,11 @@ static bool mspCommonProcessOutCommand(int16_t cmdMSP, sbuf_t *dst, mspPostProce
 #else
         sbufWriteU8(dst, 0);
 #endif
+#if defined(USE_ACC)
+        sbufWriteU16(dst, acc.dev.acc_1G);
+#else
+        sbufWriteU16(dst, 0);
+#endif
 
         break;
     }
@@ -1318,6 +1323,12 @@ case MSP_NAME:
     case MSP_RC:
         for (int i = 0; i < rxRuntimeState.channelCount; i++) {
             sbufWriteU16(dst, rcData[i]);
+        }
+        break;
+
+    case MSP_RC_RAW:
+        for (int i = 0; i < rxRuntimeState.channelCount; i++) {
+            sbufWriteU16(dst, rcOrig[i]);
         }
         break;
 
